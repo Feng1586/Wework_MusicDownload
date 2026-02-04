@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  musicdl:
+    image: 66211900/wecom-musicdl:latest
+    container_name: musicdl
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=Asia/Shanghai
+      # 企业微信配置（通过环境变量覆盖 config.py）
+      - STOKEN=${STOKEN:-s5eFTUX9A08DeVxuDf8vpeGrSVXlb}
+      - S_ENCODING_AES_KEY=${S_ENCODING_AES_KEY:-wiLax4u1XIzy88u7R47suvrDSoP0bjCSgqMMxrVilDL}
+      - S_CORP_ID=${S_CORP_ID:-wwd52b9b68a7d192fe}
+      - AGENT_ID=${AGENT_ID:-1000078}
+      - SECRET=${SECRET:-jI8zat563zywWpJgALnYdZJFVpw9HhHt1MDW7Nz77iw}
+      - WECHAT_PROXY=${WECHAT_PROXY:-http://zd.i-am-a.gay/}
+    volumes:
+      # 持久化下载的音乐文件
+      - ./downloads:/app/downloads
+      # 挂载配置文件（可选）
+      - ./config/config.py:/app/config/config.py:ro
+    networks:
+      - musicdl-network
+
+  # watchtower_musicdl:
+  #   image: docker.1ms.run/nickfedor/watchtower
+  #   container_name: watchtower_musicdl
+  #   restart: always
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   command: >
+  #     --cleanup
+  #     --interval 3600
+  #     musicdl
+
+networks:
+  musicdl-network:
+    driver: bridge

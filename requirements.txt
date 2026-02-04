@@ -1,0 +1,25 @@
+# Web Framework
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+
+# XML Processing
+xmltodict>=0.13.0
+
+# Caching
+cachetools>=5.3.2
+
+# HTTP Requests
+requests>=2.31.0
+
+# Music Download
+musicdl>=0.5.5
+
+# Pydantic
+pydantic>=2.5.0
+
+# Cryptography (for WeChat message encryption)
+# 注意：pycrypto 已停止维护，使用 pycryptodome 作为替代，接口完全兼容
+pycryptodome>=3.19.0
+
+# Cryptodome namespace for musicdl (deezer module requires Cryptodome, not Crypto)
+pycryptodomex>=3.23.0

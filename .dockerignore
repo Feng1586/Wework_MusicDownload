@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Downloads
+downloads/
+*.mp3
+*.flac
+*.m4a
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 配置备份（不要包含敏感配置）
+config/config.example.py
+
+# 日志
+*.log
+logs/
