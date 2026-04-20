@@ -93,6 +93,7 @@ python main.py
 
 服务将在 `http://0.0.0.0:8000` 启动。
 
+<<<<<<< HEAD
 ## Docker 部署
 
 ### 1. 使用 Dockerfile 构建镜像
@@ -144,6 +145,8 @@ docker run -d \
   musicdl
 ```
 
+=======
+>>>>>>> 1b6076f66c50fa4f06b2396277a63e0615d1a185
 ## 使用方法
 
 ### 搜索音乐

@@ -17,12 +17,13 @@ mkdir -p /app/downloads
 # 等待数据库/依赖项（如果需要）
 # echo "等待依赖项..."
 # sleep 5
-
+echo "Version: 1.0.0"
 echo "启动 FastAPI 服务..."
 echo "服务地址: http://0.0.0.0:8000"
 echo "回调地址: http://<your-server-ip>:8000/wechat/callback"
 echo ""
 echo "配置企业微信回调时请使用以上地址"
+echo "本机机器码：$(python -c 'from task.task import generate_machine_code; print(generate_machine_code())')"
 echo "========================================"
 
 # 启动 Python 服务

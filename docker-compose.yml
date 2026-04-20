@@ -20,20 +20,20 @@ services:
       # 持久化下载的音乐文件
       - ./downloads:/app/downloads
       # 挂载配置文件（可选）
-      - ./config/config.py:/app/config/config.py:ro
+      # - ./config/config.py:/app/config/config.py:ro
     networks:
       - musicdl-network
 
-  # watchtower_musicdl:
-  #   image: docker.1ms.run/nickfedor/watchtower
-  #   container_name: watchtower_musicdl
-  #   restart: always
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock
-  #   command: >
-  #     --cleanup
-  #     --interval 3600
-  #     musicdl
+  watchtower_musicdl:
+    image: docker.1ms.run/nickfedor/watchtower
+    container_name: watchtower_musicdl
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: >
+      --cleanup
+      --interval 3600
+      musicdl
 
 networks:
   musicdl-network:
