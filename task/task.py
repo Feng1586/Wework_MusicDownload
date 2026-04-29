@@ -60,7 +60,7 @@ def _call_search_api(payload: dict) -> dict:
             api_url = API_ENDPOINTS[_current_api_index]
             logger.info(f"尝试使用接口 {_current_api_index + 1}/{len(API_ENDPOINTS)}: {api_url}")
             
-            response = requests.post(api_url, json=payload, timeout=10)
+            response = requests.post(api_url, json=payload, timeout=60)
             response.raise_for_status()  # 检查HTTP状态码
             
             # 如果成功，返回结果
@@ -196,7 +196,7 @@ def task(content: str, ToUserName: str, nonce: str, msg_id: str, agent_id: str) 
             return
         
         if command == 'version':
-            send_msg(msg="Version: 1.0.3", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
+            send_msg(msg="Version: 1.0.4", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
             return
 
         if command == 'help':
