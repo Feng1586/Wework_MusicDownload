@@ -207,6 +207,8 @@ def _handle_download(content: str, ToUserName: str, nonce: str, msg_id: str, age
 
     真正的下载由 task/download_queue.py 里的 worker 线程按 FIFO 顺序做，
     开始和结束时各会给用户推一条消息，所以这里不用等下载完成。
+
+    回执格式：``🎧 已加入下载队列：<当前队列任务数>``（不是选中的编号）。
     """
     if not cache.get(ToUserName):
         send_msg(msg="请先搜索歌曲", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
@@ -228,16 +230,20 @@ def _handle_download(content: str, ToUserName: str, nonce: str, msg_id: str, age
                  ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
         return
 
-    # 先发回执、再入队。worker 一旦取到任务就会立刻推「开始下载」，
-    # 若先入队，用户很可能先收到「⚙️ 开始下载」再收到「🎧 已加入下载队列」，顺序是反的。
-    queued_ids = ','.join(str(job.song['id']) for job in jobs)
-    send_msg(msg=f"🎧 已加入下载队列：{queued_ids}",
+    # 回执里的数字是**当前队列的任务数**，不是用户选中的编号，
+    # 所以要在入队前把本批也算上：已有（含正在下载的）+ 本次加入。
+    #
+    # 为什么不等入队后再读 pending()：worker 一旦取到任务就会立刻推「开始下载」，
+    # 而回执要走一次公网往返 —— 先入队的话用户很可能先收到
+    # 「⚙️ 开始下载」再收到「🎧 已加入下载队列」，顺序是反的。
+    queue_size = download_queue.pending() + len(jobs)
+    logger.info(f"入队 {len(jobs)} 首（ID {','.join(str(j.song['id']) for j in jobs)}），"
+                f"队列共 {queue_size} 条")
+    send_msg(msg=f"🎧 已加入下载队列：{queue_size}",
              ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
 
     for job in jobs:
         download_queue.submit(job)
-
-    logger.info(f"已加入下载队列 {queued_ids}，当前排队 {download_queue.pending()} 条")
 
 
 def _handle_search(content: str, ToUserName: str, nonce: str, msg_id: str, agent_id: str) -> None:
