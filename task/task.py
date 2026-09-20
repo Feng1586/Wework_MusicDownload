@@ -8,6 +8,7 @@ from musicdl import musicdl
 from musicdl.modules.utils.misc import IOUtils, sanitize_filepath
 from model.wechat_url_valdator import send_msg
 from utils.logger import logger
+from utils.version import __version__
 
 from config import config
 
@@ -17,13 +18,42 @@ music_client = musicdl.MusicClient(music_sources=config.src_names,init_music_cli
 
 # 接口地址列表，按优先级排序
 API_ENDPOINTS = [
-    "http://musicdownloads.i-am-a.gay/music/search/qq",  # CloudFlare代理（可能被DDOS）
-    "http://zd.i-am-a.gay:38001/music/search/qq",        # 直连接口
-    "http://www.i-am-a.gay:8001/music/search/qq",         # 备用接口
+    "https://musicdownloads.i-am-a.gay:3000/music/search/qq",  # 宝塔 nginx 反向代理（HTTPS）
+    "http://zd.i-am-a.gay:38001/music/search/qq",               # 直连接口
 ]
 
 # 当前使用的接口索引
 _current_api_index = 0
+
+# 后端在「未授权 / 限流 / 服务登录中」时返回的是**结构相同**的占位数据，
+# 唯一区别是 download_url 恒为字符串 "null"（不是 None，也不是缺失）。
+#
+# 这里必须把两种「没有下载地址」区分开，语义完全不同：
+#   'null'  —— 后端明确告诉你服务不可用（未授权/限流/登录中），必须原样转达用户；
+#   None/'' —— musicdl 对真实存在但取不到地址的歌就是给 None，属于「真没结果」，
+#              这种情况才应该触发本地兜底搜索。
+# 只判 `is None` 是最初的 bug：会把占位数据当成正常搜索结果，
+# 用户看到一首叫「此程序为付费应用」的歌，回复 ID 后还会收到
+# "Invalid URL 'null'" 这种看不懂的报错。
+PLACEHOLDER_DOWNLOAD_URL = 'null'
+INVALID_DOWNLOAD_URLS = (None, '', PLACEHOLDER_DOWNLOAD_URL)
+
+
+def _is_placeholder(song: dict) -> bool:
+    """该条目是不是后端的占位响应（未授权 / 限流 / 服务登录中）。"""
+    return song.get('download_url') == PLACEHOLDER_DOWNLOAD_URL
+
+
+def _is_downloadable(song: dict) -> bool:
+    """该条目是否带有真正可用的下载地址。"""
+    return song.get('download_url') not in INVALID_DOWNLOAD_URLS
+
+
+def _format_notice(song: dict) -> str:
+    """把后端占位条目里的提示文案（放在 song_name / singers 上）拼成一行。"""
+    parts = [x for x in (song.get('song_name'), song.get('singers')) if x]
+    return '：'.join(parts)
+
 
 def generate_machine_code():
 
@@ -155,24 +185,45 @@ def _handle_search(content: str, ToUserName: str, nonce: str, msg_id: str, agent
 
         all_songs = []
         msg = ""
+        notices = []
 
+        # 只把「真的有下载地址」的条目放进列表和缓存，保证列表里的每个编号都能下载
         for source, songs in search_results.items():
             for song in songs:
+                # 后端占位响应：只收集提示文案，绝不作为结果
+                if _is_placeholder(song):
+                    notice = _format_notice(song)
+                    if notice:
+                        notices.append(notice)
+                    continue
+                # 真实条目但取不到地址（musicdl 对这类歌给 None）：跳过，后面走本地兜底
+                if not _is_downloadable(song):
+                    continue
                 song_info = _build_song_info(song, all_songs)
                 all_songs.append(song_info)
                 msg = msg + f"{song_info['id']}. {song_info['singers']}, {song_info['song_name']} \n"
 
-        # 如果在线搜索结果无下载链接，尝试使用本地搜索
-        if not all_songs or all_songs[0]['download_url'] is None:
+        # 一条可下载的都没有，但后端给了提示（未授权 / 限流 / 服务登录中）：
+        # 这是服务端明确的答复，此时**不能**回退本地搜索 —— 那等于绕过机器码授权。
+        # 把后端的提示原样告诉用户，比笼统的「未找到相关歌曲」有用得多。
+        if not all_songs and notices:
+            logger.warning(f"后端返回占位响应: {notices}")
+            send_msg(msg="\n".join(notices), ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
+            return
+
+        # 真的没有结果，或结果里没有任何可下载地址，尝试使用本地搜索
+        if not all_songs:
             logger.warning("在线搜索结果无下载链接，尝试使用本地搜索结果")
             local_results = music_client.search(keyword=content)
             for source, songs in local_results.items():
                 for song in songs:
+                    if not _is_downloadable(song):
+                        continue
                     song_info = _build_song_info(song, all_songs)
                     all_songs.append(song_info)
                     msg = msg + f"{song_info['id']}. {song_info['singers']}, {song_info['song_name']} \n"
 
-        if not all_songs or all_songs[0]['download_url'] is None:
+        if not all_songs:
             send_msg(msg="未找到相关歌曲", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
         else:
             msg = msg + "请回复最前面的数字ID进行下载"
@@ -185,6 +236,11 @@ def _handle_search(content: str, ToUserName: str, nonce: str, msg_id: str, agent
 
 
 def task(content: str, ToUserName: str, nonce: str, msg_id: str, agent_id: str) -> None:
+    # 事件类回调等没有正文的消息直接忽略，避免后面 content.startswith 抛 AttributeError
+    if not content:
+        logger.warning("收到空消息，忽略")
+        return
+
     # 以 / 开头的特殊指令分支
     if content.startswith('/'):
         command = content[1:].strip().lower()
@@ -196,7 +252,7 @@ def task(content: str, ToUserName: str, nonce: str, msg_id: str, agent_id: str) 
             return
         
         if command == 'version':
-            send_msg(msg="Version: 1.0.4", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
+            send_msg(msg=f"Version: {__version__}", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
             return
 
         if command == 'help':

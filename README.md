@@ -49,41 +49,52 @@ pip install -r requirements.txt
 
 ### 3. 配置
 
-复制配置示例文件并修改：
+所有企业微信凭据都通过**环境变量**读取，代码和示例文件里都不含任何默认凭据。
+
+复制环境变量示例并填写（推荐，Docker 与本地运行都适用）：
+
+```bash
+cp .env.example .env
+```
+
+```ini
+# .env —— 变量名必须与 config/config.py 中 os.environ.get(...) 读的名字一致
+STOKEN=your_token_here
+S_ENCODING_AES_KEY=your_encoding_aes_key_here
+S_CORP_ID=your_corp_id_here
+AGENT_ID=your_agent_id_here
+SECRET=your_secret_here
+WECHAT_PROXY=http://your-proxy-or-qyapi/
+```
+
+| 变量 | 说明 |
+|------|------|
+| `STOKEN` | 企业微信应用的 Token |
+| `S_ENCODING_AES_KEY` | 消息加密密钥 |
+| `S_CORP_ID` | 企业 ID |
+| `AGENT_ID` | 应用 ID |
+| `SECRET` | 应用 Secret |
+| `WECHAT_PROXY` | 企业微信 API 接入地址（结尾必须带 `/`） |
+
+如果你不用 `.env`，也可以直接复制配置文件再手工填写：
 
 ```bash
 cp config/config.example.py config/config.py
 ```
 
-编辑 `config/config.py`，填入你的企业微信配置：
+`config/config.py` 同样是环境变量优先的，把 `os.environ.get('STOKEN', "")` 的
+第二个参数填成你的值即可。本机运行 `python main.py` 时走的就是这个文件。
 
-```python
-# 企业微信配置
-sToken = "your_token_here"
-sEncodingAESKey = "your_encoding_aes_key_here"
-sCorpID = "your_corp_id_here"
-AgentId = "your_agent_id_here"
-Secret = "your_secret_here"
-WeChatProxy = "https://qyapi.weixin.qq.com/"  # 或使用你的代理地址
-
-# 音乐平台 VIP Cookies（可选）
-QqVipCookies = ""
-MiguVipCookies = ""
-NeteaseVipCookies = ""
-KuwoVipCookies = ""
-QianqianVipCookies = ""
-
-# 启用的音乐源
-src_names = ['QQMusicClient']  # 可选: ['MiguMusicClient', 'NeteaseMusicClient', 'QQMusicClient', 'KuwoMusicClient', 'QianqianMusicClient']
-```
+> 注意：**不要**把填好的 `config/config.py` 或 `.env` 提交到仓库 ——
+> 两者都已在 `.gitignore` 中，且 `.dockerignore` 也会把它们挡在镜像之外。
 
 ### 4. 配置企业微信回调
 
 在企业微信管理后台配置应用回调URL：
 
 - 回调URL: `http://your-server-ip:8000/wechat/callback`
-- Token: 与配置文件中的 `sToken` 一致
-- EncodingAESKey: 与配置文件中的 `sEncodingAESKey` 一致
+- Token: 与 `.env` 中的 `STOKEN` 一致
+- EncodingAESKey: 与 `.env` 中的 `S_ENCODING_AES_KEY` 一致
 
 ### 5. 启动服务
 
@@ -91,9 +102,8 @@ src_names = ['QQMusicClient']  # 可选: ['MiguMusicClient', 'NeteaseMusicClient
 python main.py
 ```
 
-服务将在 `http://0.0.0.0:8000` 启动。
+服务将在 `http://0.0.0.0:8000` 启动（可用环境变量 `HOST` / `PORT` 覆盖）。
 
-<<<<<<< HEAD
 ## Docker 部署
 
 ### 1. 使用 Dockerfile 构建镜像
@@ -113,23 +123,31 @@ docker run -d \
 
 ### 2. 使用 Docker Compose
 
-创建 `.env` 文件配置企业微信参数：
+先在当前目录创建 `.env` 文件（compose 会从它读取变量）：
 
 ```bash
+cp .env.example .env
+```
+
+```ini
 # .env 文件
 STOKEN=your_token_here
 S_ENCODING_AES_KEY=your_encoding_aes_key_here
 S_CORP_ID=your_corp_id_here
 AGENT_ID=your_agent_id_here
 SECRET=your_secret_here
-WECHAT_PROXY=https://qyapi.weixin.qq.com/
+WECHAT_PROXY=http://your-proxy-or-qyapi/
 ```
 
 启动服务：
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
+
+> `docker-compose.yml` 里这几个变量用的是 `${VAR:?}` 形式：**缺少 `.env` 或漏填时会直接报错退出**，
+> 而不是拿空凭据静默启动、到用户发消息时才报一句看不懂的「微信验证失败」。
+> 若看到 `required variable ... is missing a value`，说明对应变量没填。
 
 ### 3. 配置文件挂载
 
@@ -145,8 +163,6 @@ docker run -d \
   musicdl
 ```
 
-=======
->>>>>>> 1b6076f66c50fa4f06b2396277a63e0615d1a185
 ## 使用方法
 
 ### 搜索音乐
