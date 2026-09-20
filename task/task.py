@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from cachetools import TTLCache
 
@@ -55,6 +56,47 @@ def _format_notice(song: dict) -> str:
     return '：'.join(parts)
 
 
+# ---------------------------------------------------------------------------
+# 下载目录的归属
+#
+# 后端返回的 work_dir 是**后端主机上的绝对路径**，例如：
+#   G:/Desktop/.../musicdl-backend/downloads/QQMusicClient/2026-09-20-22-54-19 青花瓷
+# 这种路径在机器人容器里根本不存在。直接拿来用，文件会被写进容器内部
+# （os.path.join 之后变成 /app/G:/Desktop/... ），宿主机映射出来的
+# ./downloads 目录里什么都看不到 —— 这正是「下载成功但找不到文件」的原因。
+#
+# 文件落在哪应该由**下载方**决定，也就是这里：机器人容器才有那个卷。
+# 所以下面只从后端路径里取出 downloads/ 之后的相对片段
+# （保留按搜索批次分目录的习惯，和历史文件结构一致），
+# 再拼到本机自己的下载根目录下。
+# ---------------------------------------------------------------------------
+DOWNLOAD_ROOT = os.environ.get('DOWNLOAD_DIR') or 'downloads'
+
+
+def _resolve_work_dir(raw_work_dir) -> str:
+    """把后端给的 work_dir 归一化成容器内可写的相对路径。"""
+    fallback = os.path.join(DOWNLOAD_ROOT, 'QQMusicClient')
+    if not raw_work_dir:
+        return fallback
+
+    normalized = str(raw_work_dir).replace('\\', '/').strip()
+
+    # 只取 downloads/ 之后的相对片段；取不到就整体丢弃
+    tail = ''
+    if '/downloads/' in normalized:
+        tail = normalized.split('/downloads/', 1)[1]
+    elif normalized.startswith('downloads/'):
+        tail = normalized[len('downloads/'):]
+
+    # 兜底清洗：去掉盘符、前导斜杠，并剔掉 . 与 .. 防止越界写到目录之外
+    tail = re.sub(r'^[A-Za-z]:', '', tail).strip('/')
+    parts = [p for p in tail.split('/') if p not in ('', '.', '..')]
+    if not parts:
+        return fallback
+
+    return os.path.join(DOWNLOAD_ROOT, *parts)
+
+
 def generate_machine_code():
 
     Secret = config.Secret
@@ -75,7 +117,9 @@ def _build_song_info(song: dict, all_songs: list) -> dict:
         'source': song.get('source', '未知'),
         'download_url': song.get('download_url'),
         'ext': song.get('ext', 'mp3'),
-        'work_dir': song.get('work_dir', './downloads')
+        # 不能直接用后端返回的 work_dir（那是后端主机上的绝对路径），
+        # 必须归一化成本机可写的相对路径，否则文件会落到映射目录之外
+        'work_dir': _resolve_work_dir(song.get('work_dir'))
     }
 
 
