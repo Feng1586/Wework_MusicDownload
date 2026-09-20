@@ -1,13 +1,14 @@
 import os
 import re
+import threading
 import requests
 from cachetools import TTLCache
 
 import hashlib
 
 from musicdl import musicdl
-from musicdl.modules.utils.misc import IOUtils, sanitize_filepath
 from model.wechat_url_valdator import send_msg
+from task.download_queue import DownloadJob, download_queue, make_headers
 from utils.logger import logger
 from utils.version import __version__
 
@@ -16,6 +17,11 @@ from config import config
 cache = TTLCache(maxsize=1000, ttl=60)
 
 music_client = musicdl.MusicClient(music_sources=config.src_names,init_music_clients_cfg = config.init_music_clients_cfg)
+
+# musicdl 的 MusicClient 内部共用 session 等状态，不是为并发设计的。
+# 现在用户入队后可以马上继续搜索，本地兜底搜索被并发触发的概率明显变高，
+# 所以这里串行化一下。后台下载不再经过它（队列在入队时就把请求头快照走了）。
+_music_client_lock = threading.Lock()
 
 # 接口地址列表，按优先级排序
 API_ENDPOINTS = [
@@ -164,58 +170,74 @@ def _is_download_ids(content: str) -> bool:
     return all(p.isdigit() for p in parts) and len(parts) > 0
 
 
+def _parse_song_ids(content: str) -> list:
+    """把 "1,3,5" 解析成 [1, 3, 5]；顺手去重并保持用户输入的顺序。"""
+    ids = []
+    for part in content.split(','):
+        part = part.strip()
+        if not part.isdigit():
+            continue
+        value = int(part)
+        if value not in ids:
+            ids.append(value)
+    return ids
+
+
+def _build_download_job(song_info: dict, ToUserName: str, nonce: str,
+                        msg_id: str, agent_id: str) -> DownloadJob:
+    """把一条搜索结果变成一条待下载任务。
+
+    这里把下载需要的东西**全部快照下来**（歌曲信息 + 请求头），
+    而不是「先记编号、下载时再回查搜索结果」—— 否则用户入队后紧接着
+    再搜一次（这正是新功能要支持的），缓存被覆盖，排队的歌就找不到了。
+    """
+    source_client = music_client.music_clients.get(song_info.get('source'))
+    return DownloadJob(
+        song=dict(song_info),
+        headers=make_headers(source_client),
+        touser=ToUserName,
+        msg_id=msg_id,
+        agent_id=agent_id,
+        nonce=nonce,
+    )
+
+
 def _handle_download(content: str, ToUserName: str, nonce: str, msg_id: str, agent_id: str) -> None:
-    """处理歌曲下载逻辑"""
+    """把用户选中的编号加入下载队列，回复后立即返回。
+
+    真正的下载由 task/download_queue.py 里的 worker 线程按 FIFO 顺序做，
+    开始和结束时各会给用户推一条消息，所以这里不用等下载完成。
+    """
     if not cache.get(ToUserName):
         send_msg(msg="请先搜索歌曲", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
         return
 
     all_songs = cache[ToUserName]
-    ids = [int(x.strip()) for x in content.split(',')]
 
-    for idx in ids:
+    jobs = []
+    for idx in _parse_song_ids(content):
         song_info = next((s for s in all_songs if s['id'] == idx), None)
-
         if not song_info:
             logger.warning(f"ID {idx} 不存在，跳过。")
             continue
+        jobs.append(_build_download_job(song_info, ToUserName, nonce, msg_id, agent_id))
 
-        logger.info(f"正在下载: {song_info['singers']} - {song_info['song_name']} ({song_info['source']})...")
+    # 一个有效编号都没有时要说一声，否则用户只会看到队列提示里少了个数字
+    if not jobs:
+        send_msg(msg="未找到对应的歌曲编号，请回复搜索结果里的数字",
+                 ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
+        return
 
-        try:
-            with requests.get(
-                song_info['download_url'],
-                headers=music_client.music_clients[song_info['source']].default_download_headers,
-                stream=True,
-                verify=False
-            ) as resp:
-                if resp.status_code == 200:
-                    total_size = int(resp.headers.get('content-length', 0))
-                    chunk_size = 1024
-                    download_size = 0
+    # 先发回执、再入队。worker 一旦取到任务就会立刻推「开始下载」，
+    # 若先入队，用户很可能先收到「⚙️ 开始下载」再收到「🎧 已加入下载队列」，顺序是反的。
+    queued_ids = ','.join(str(job.song['id']) for job in jobs)
+    send_msg(msg=f"🎧 已加入下载队列：{queued_ids}",
+             ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
 
-                    IOUtils.touchdir(song_info['work_dir'])
+    for job in jobs:
+        download_queue.submit(job)
 
-                    filename = f"{song_info['song_name']}.{song_info['ext']}"
-                    save_path = sanitize_filepath(os.path.join(song_info['work_dir'], filename))
-
-                    with open(save_path, 'wb') as fp:
-                        for chunk in resp.iter_content(chunk_size=chunk_size):
-                            if not chunk:
-                                continue
-                            fp.write(chunk)
-                            download_size += len(chunk)
-                            if total_size > 0:
-                                percent = int(download_size / total_size * 100)
-                                print(f"\r进度: {percent}%", end='')
-
-                    send_msg(msg="下载成功", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
-                else:
-                    send_msg(msg="下载失败，请稍后再试", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
-
-        except Exception as e:
-            logger.error(f"下载出错: {e}", exc_info=True)
-            send_msg(msg=f"下载出错: {str(e)}", ToUserName=ToUserName, msg_id=msg_id, agent_id=agent_id, nonce=nonce)
+    logger.info(f"已加入下载队列 {queued_ids}，当前排队 {download_queue.pending()} 条")
 
 
 def _handle_search(content: str, ToUserName: str, nonce: str, msg_id: str, agent_id: str) -> None:
@@ -258,7 +280,8 @@ def _handle_search(content: str, ToUserName: str, nonce: str, msg_id: str, agent
         # 真的没有结果，或结果里没有任何可下载地址，尝试使用本地搜索
         if not all_songs:
             logger.warning("在线搜索结果无下载链接，尝试使用本地搜索结果")
-            local_results = music_client.search(keyword=content)
+            with _music_client_lock:
+                local_results = music_client.search(keyword=content)
             for source, songs in local_results.items():
                 for song in songs:
                     if not _is_downloadable(song):
