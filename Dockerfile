@@ -20,8 +20,12 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制项目文件
+# 复制项目文件（config/config.py 已被 .dockerignore 排除，不会带进来）
 COPY . .
+
+# 生成运行时配置：镜像内不含任何真实凭据，
+# config.py 由 config.example.py 生成，所有凭据通过环境变量注入。
+RUN cp config/config.example.py config/config.py && test -f config/config.py
 
 # 创建下载目录
 RUN mkdir -p /app/downloads

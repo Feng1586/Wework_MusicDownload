@@ -3,10 +3,13 @@
 .gitignore
 
 # Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# 注意：Docker 的忽略规则是按相对路径匹配的，只写 `__pycache__/` 只匹配顶层，
+# 匹配不到 config/__pycache__ 这类子目录。子目录里由宿主机编译出来的 .pyc
+# 会把 config.py 里的凭据当字符串常量一起编进字节码 —— 必须用 ** 覆盖任意层级。
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
 .Python
 env/
 venv/
@@ -34,8 +37,22 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 
-# 配置备份（不要包含敏感配置）
-config/config.example.py
+# 本地真实配置与凭据：绝不进镜像
+# 注意：config/config.example.py 必须保留在构建上下文里，
+# 镜像内的 config/config.py 由 Dockerfile 从它生成。
+config/config.py
+.env.local
+
+# 文档（镜像里用不到）
+*.md
+README.md
+
+# 本应用只使用 weworkapi.callback_python3（见 model/wechat_url_valdator.py），
+# 其余 SDK 变体和 api 示例都不必进镜像，去掉这几行即可恢复。
+weworkapi/api/
+weworkapi/callback/
+weworkapi/callback_json/
+weworkapi/callback_json_python3/
 
 # 日志
 *.log

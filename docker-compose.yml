@@ -9,17 +9,31 @@ services:
       - "8000:8000"
     environment:
       - TZ=Asia/Shanghai
-      # 企业微信配置（通过环境变量覆盖 config.py）
-      - STOKEN=${STOKEN:-s5eFTUX9A08DeVxuDf8vpeGrSVXlb}
-      - S_ENCODING_AES_KEY=${S_ENCODING_AES_KEY:-wiLax4u1XIzy88u7R47suvrDSoP0bjCSgqMMxrVilDL}
-      - S_CORP_ID=${S_CORP_ID:-wwd52b9b68a7d192fe}
-      - AGENT_ID=${AGENT_ID:-1000078}
-      - SECRET=${SECRET:-jI8zat563zywWpJgALnYdZJFVpw9HhHt1MDW7Nz77iw}
-      - WECHAT_PROXY=${WECHAT_PROXY:-http://zd.i-am-a.gay/}
+      # 企业微信配置：全部来自同目录下的 .env（compose 会自动加载该文件）
+      # 这里刻意不写任何默认值，凭据一律不进仓库。
+      # 用 ${VAR:?} 而不是 ${VAR}，是为了在 .env 缺失/漏填时直接报错退出，
+      # 而不是拿空凭据静默启动、到运行时才报一句看不懂的“微信验证失败”。
+      # 首次部署：cp .env.example .env，填好后再 up。
+      - "STOKEN=${STOKEN:?请在 .env 中设置 STOKEN}"
+      - "S_ENCODING_AES_KEY=${S_ENCODING_AES_KEY:?请在 .env 中设置 S_ENCODING_AES_KEY}"
+      - "S_CORP_ID=${S_CORP_ID:?请在 .env 中设置 S_CORP_ID}"
+      - "AGENT_ID=${AGENT_ID:?请在 .env 中设置 AGENT_ID}"
+      - "SECRET=${SECRET:?请在 .env 中设置 SECRET}"
+      - "WECHAT_PROXY=${WECHAT_PROXY:?请在 .env 中设置 WECHAT_PROXY}"
+      # 可选的本地兜底搜索 Cookie，留空即匿名搜索。
+      # 用 :- 给空默认值：没配也要能正常启动，不参与必填校验。
+      - "QQ_VIP_COOKIES=${QQ_VIP_COOKIES:-}"
+      - "MIGU_VIP_COOKIES=${MIGU_VIP_COOKIES:-}"
+      - "NETEASE_VIP_COOKIES=${NETEASE_VIP_COOKIES:-}"
+      - "KUWO_VIP_COOKIES=${KUWO_VIP_COOKIES:-}"
+      - "QIANQIAN_VIP_COOKIES=${QIANQIAN_VIP_COOKIES:-}"
     volumes:
       # 持久化下载的音乐文件
       - ./downloads:/app/downloads
-      # 挂载配置文件（可选）
+      # 一般不需要挂载配置：镜像内的 config/config.py 由 Dockerfile 从
+      # config.example.py 生成，凭据统一走上面的环境变量。
+      # 只有在需要覆盖非凭据类配置（如 music 源列表）时才启用下面这行，
+      # 且挂载的是主机文件，不会进入镜像层。
       # - ./config/config.py:/app/config/config.py:ro
     networks:
       - musicdl-network
