@@ -123,6 +123,12 @@ def _build_song_info(song: dict, all_songs: list) -> dict:
         'source': song.get('source', '未知'),
         'download_url': song.get('download_url'),
         'ext': song.get('ext', 'mp3'),
+        # 歌词与封面。后端返回的是 musicdl 的完整 SongInfo，
+        # 里面已经带着 QQ 的 LRC 全文和 800x800 封面地址，**不需要额外请求**，
+        # 这里留住即可（下载完成后由 utils/mediatags.py 落盘 + 嵌入标签）。
+        'lyric': song.get('lyric'),
+        'cover_url': song.get('cover_url'),
+        'album': song.get('album'),
         # 不能直接用后端返回的 work_dir（那是后端主机上的绝对路径），
         # 必须归一化成本机可写的相对路径，否则文件会落到映射目录之外
         'work_dir': _resolve_work_dir(song.get('work_dir'))

@@ -29,3 +29,8 @@ pycryptodomex==3.23.0
 # musicdl 自身声明 cryptography<47，这里显式钉住上界，
 # 避免将来解析到 47+ 时静默破坏 musicdl 的加密相关模块。
 cryptography>=46.0.5,<47
+
+# 音频标签读写（写歌词与封面）。它本来就是 musicdl 的依赖之一
+# （`mutagen<2,>=1.47.0`），这里显式钉住是因为 utils/mediatags.py 直接 import 它，
+# 属于我们自己的直接依赖，不该只靠传递依赖带进来。
+mutagen==1.48.1

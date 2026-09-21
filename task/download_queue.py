@@ -7,7 +7,8 @@
 这个模块把「下载」从「回复的同步流程」里摘出来：
 
     task.py  解析编号 -> 入队 -> 立刻回一条「已加入下载队列」
-    这里     worker 线程按 FIFO 顺序慢慢下，开始/结束各推一条消息
+    这里     worker 线程按 FIFO 顺序慢慢下，开始/结束各推一条消息，
+             落盘后再补上歌词与封面（见 utils/mediatags.py）
 
 于是用户入队后可以马上继续搜索，两边互不阻塞。
 
@@ -34,6 +35,7 @@ from musicdl.modules.utils.misc import IOUtils, sanitize_filepath
 
 from model.wechat_url_valdator import send_msg
 from utils.logger import logger
+from utils.mediatags import save_lyrics_and_cover
 
 # 同时下载几首。1 = 严格排队。
 WORKER_COUNT = 1
@@ -146,6 +148,12 @@ class DownloadQueue:
             job.reply(f"❌ 下载失败：{job.title}\n原因：{e}")
             return
 
+        # 歌词与封面必须在报大小之前处理完 —— 嵌入标签会把文件撑大，
+        # 先报大小就会出现「报文 149.2 MB、磁盘上 149.5 MB」这种对不上的情况。
+        # 代价是「✅ 下载完成」晚到一点（实测容器里约 1 秒），
+        # 但这条消息用户并不是在同步等待，而它报的数字必须对得上文件本身。
+        self._save_extras(job, save_path)
+
         try:
             size = os.path.getsize(save_path)
         except OSError as e:
@@ -155,6 +163,30 @@ class DownloadQueue:
         # 报给用户的是磁盘上真实的名字 —— sanitize_filepath 可能改写过它，
         # 所以这里取 basename(save_path) 而不是拼接时的那个字符串。
         job.reply(f"✅ 下载完成：{os.path.basename(save_path)}\n💾 大小：{format_size(size)}")
+
+    def _save_extras(self, job: DownloadJob, save_path: str) -> None:
+        """补上歌词与封面（同名伴随文件 + 嵌入音频标签）。
+
+        全程尽力而为：`save_lyrics_and_cover` 内部已经逐项兜底，
+        这里再包一层，是因为「带歌词封面」只是锦上添花，
+        绝不能让它影响「这首歌下载成功了」这个结论。
+        """
+        song = job.song
+        if not song.get('lyric') and not song.get('cover_url'):
+            return
+        try:
+            result = save_lyrics_and_cover(
+                save_path,
+                lyric=song.get('lyric'),
+                cover_url=song.get('cover_url'),
+                song_name=song.get('song_name'),
+                singers=song.get('singers'),
+            )
+            logger.info("歌词/封面已处理 %s：lrc=%s jpg=%s 嵌入标签=%s",
+                        os.path.basename(save_path),
+                        result['lrc'], result['jpg'], result['embedded'])
+        except Exception as e:
+            logger.warning("保存歌词/封面异常（%s）：%s", os.path.basename(save_path), e)
 
     def _download(self, job: DownloadJob) -> str:
         """下载单首歌，返回落盘后的绝对/相对路径。"""
